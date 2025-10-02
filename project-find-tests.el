@@ -8,36 +8,7 @@
 (require 'compile)
 (require 'project-find)
 (require 'project)
-
-(defun log-msg (format-string &rest args)
-  "Log a debug message.
-FORMAT-STRING and ARGS are passed to `format'."
-  (let ((inhibit-message nil))
-    (message "DEBUG: %s" (format format-string args))))
-
-(defmacro pf-my-test-fixture (&rest body)
-  "A fixture to set up a common environment for tests.  BODY is the test code."
-  `(let ((inhibit-message t)
-         (pf--update-count 0)
-         (pf-command (concat (file-name-directory
-                              (find-lisp-object-file-name #'pf nil))
-                             "/koru_find")))
-     (unwind-protect
-         (progn ,@body)
-
-       (pf-kill-process)
-       (when (get-buffer "*project-find")
-         (let ((kill-buffer-query-functions nil))
-           (kill-buffer "*project-find*"))))))
-
-(defun pf-my-add-keys (keys &optional ready-test time)
-  "Add KEYS via `pf-self-filter-add'.
-Call `pf--wait-for' with TIME and READY-TEST if not nil."
-  (mapc (lambda (k)
-          (let ((last-command-event k))(pf-self-filter-add)))
-        keys)
-  (when ready-test
-    (pf--wait-for ready-test time)))
+(require 'project-find-test-helper)
 
 (ert-deftest pf-get-process ()
   (pf-my-test-fixture
@@ -78,7 +49,7 @@ Call `pf--wait-for' with TIME and READY-TEST if not nil."
      (pf-add-line "test/1/2.txt")
      (pf-add-line "test/1/3.txt")
      (let ((last-command-event (aref (kbd "M-2") 0)))
-       (pf-find-file-for-entry))
+       (pf-find-entry))
      (should (equal (buffer-name) "3.txt")))))
 
 
@@ -218,6 +189,37 @@ Call `pf--wait-for' with TIME and READY-TEST if not nil."
   (should (eq (pf--find-common-dir "ab/d" "ab/c") 3))
   (should (eq (pf--find-common-dir "/d" "/c") 1))
   (should (not (pf--find-common-dir "abd" "abc"))))
+
+(ert-deftest pf-overrides ()
+  (pf-my-test-fixture
+   (pf-init)
+   (should (eq (current-local-map) project-find-mode-map))
+   (use-local-map (make-sparse-keymap))
+   (should (not (eq (current-local-map) project-find-mode-map)))
+   (setq pf-find-function #'ignore
+         pf-filter-changed-function #'ignore
+         pf--filter-text "set")
+   (pf) ;; calls pf-init
+   (should (eq (current-local-map) project-find-mode-map))
+   (should (eq pf-find-function nil))
+   (should (eq pf-filter-changed-function nil))
+   (should (equal pf--filter-text ""))
+
+   (let* (text
+          (pf-find-function (lambda (start end)
+                              (setq text (buffer-substring-no-properties start end))
+                              )))
+     (pf-my-add-keys ">.txt")
+     (should (pf--wait-for
+              (lambda ()
+                (pf-goto-results)
+                (= 2 (count-lines (point) (point-max))))))
+     (pf-forward-line)
+     (save-excursion
+       (goto-char (overlay-start pf--selected-overlay))
+       (should (looking-at "test/1/3.txt")))
+     (pf-find-selected)
+     (should (equal text "test/1/3.txt")))))
 
 (ert-deftest pf-find-selected ()
   (pf-my-test-fixture

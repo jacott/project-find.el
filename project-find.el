@@ -81,6 +81,12 @@
    'line-prefix (propertize "Filter: " 'face 'pf-filter-prompt-face))
   "The prompt displayed before filter text.")
 
+(defvar-local pf-find-function nil
+  "Custom find function called when an entry is selected.")
+
+(defvar-local pf-filter-changed-function nil
+  "Custom function to handle updating search results when the filter changes.")
+
 (defvar-local pf--margin-overlays nil
   "Cache margin overlays.")
 
@@ -102,15 +108,15 @@
   "<remap> <next-line>" #'pf-forward-line
   "<backspace>" #'pf-backward-delete-char
   "<return>" #'pf-find-selected
-  "M-1" #'pf-find-file-for-entry
-  "M-2" #'pf-find-file-for-entry
-  "M-3" #'pf-find-file-for-entry
-  "M-4" #'pf-find-file-for-entry
-  "M-5" #'pf-find-file-for-entry
-  "M-6" #'pf-find-file-for-entry
-  "M-7" #'pf-find-file-for-entry
-  "M-8" #'pf-find-file-for-entry
-  "M-9" #'pf-find-file-for-entry)
+  "M-1" #'pf-find-entry
+  "M-2" #'pf-find-entry
+  "M-3" #'pf-find-entry
+  "M-4" #'pf-find-entry
+  "M-5" #'pf-find-entry
+  "M-6" #'pf-find-entry
+  "M-7" #'pf-find-entry
+  "M-8" #'pf-find-entry
+  "M-9" #'pf-find-entry)
 
 (define-derived-mode project-find-mode fundamental-mode "Project Find"
   ;;   "Major mode for finding project files.
@@ -132,11 +138,14 @@
 
 (defun pf-buffer-changed (_start _end _old-len)
   "Hook that sends any changes of the filter to the back-end server."
-  (let ((text (pf-filter-text)))
+  (let ((text (pf-filter-text))
+        (original pf--filter-text))
     (when (not (equal text pf--filter-text))
       (setq pf--filter-text text)
       (pf-propertize-filter-text)
-      (process-send-string (pf-get-process) (format "set 0 %s\x00" text)))))
+      (if pf-filter-changed-function
+          (funcall pf-filter-changed-function text original)
+        (process-send-string (pf-get-process) (format "set 0 %s\x00" text))))))
 
 (defun pf-process-filter (_proc output)
   "Display koru_find output.
@@ -151,7 +160,7 @@ OUTPUT contains data from the process."
           (setq ans pl)))
       (setq lines (cdr lines)))
     (if ans
-        (pf--post-process-filter (car ans) (cdr ans)))
+        (pf-post-process-filter (car ans) (cdr ans)))
     (setq pf-process-output (or (car lines) ""))))
 
 (defun pf-process-line (line)
@@ -248,7 +257,7 @@ Returns the reault of READY-TEST."
       ans)))
 
 
-(defun pf--post-process-filter (start lineno)
+(defun pf-post-process-filter (start lineno)
   "Set the margin counter from position START until LINENO is 10.
 Reposition selected line."
   (save-excursion
@@ -295,15 +304,31 @@ Reposition selected line."
       (setq i (1+ i)))
     a))
 
-(defun pf-find-file (filename)
-  "Open buffer for FILENAME and hide the finder buffer."
-  (if (file-exists-p filename)
-      (let ((buf (current-buffer))
-            (nbuf (find-file-noselect filename)))
-        (switch-to-prev-buffer nil 'kill)
-        (switch-to-buffer nbuf nil t)
-        (bury-buffer-internal buf))
-    (error "File does not exist %s" filename)))
+(defun pf-find-entery-at (start end)
+  "Find the entry location in the region START END.
+If `pf-find-function' is not nil it will override the default behaviour.
+The default behaviour will attempt to call `find-file-noselect'
+on (`buffer-substring' START END).
+This function must be called with `pf-buffer-name' as the current buffer."
+  (if pf-find-function
+      (funcall pf-find-function start end)
+    (let ((filename (buffer-substring-no-properties start end)))
+      (if (file-exists-p filename)
+          (let ((buf (current-buffer))
+                (nbuf (find-file-noselect filename)))
+            (switch-to-prev-buffer nil 'kill)
+            (switch-to-buffer nbuf nil t)
+            (bury-buffer-internal buf))
+        (error "File does not exist %s" filename)))))
+
+(defun pf-selected-start ()
+  "Return the buffer position of the start of the selected line."
+  (overlay-start pf--selected-overlay))
+
+(defun pf-selected-end ()
+  "Return the buffer position of the end of the selected line."
+  (when-let* ((end (overlay-end pf--selected-overlay)))
+    (1- end)))
 
 (defun pf-find-selected (&optional n)
   "Open buffer for the line relative to the selected line by N.
@@ -312,27 +337,20 @@ Opens the selected line if N is nil or 0."
   (when n
     (pf-forward-line n))
   (when (overlay-buffer pf--selected-overlay)
-    (pf-find-file (buffer-substring-no-properties (overlay-start pf--selected-overlay)
-                                                  (1- (overlay-end pf--selected-overlay))))))
+    (pf-find-entery-at (pf-selected-start) (pf-selected-end))))
 
-(defun pf-find-file-for-entry ()
+(defun pf-find-entry ()
   "Open buffer for file based on the basic key K."
   (interactive)
-  (pf-find-file (pf-nth-entry-filenme (- (event-basic-type last-command-event) ?0))))
-
-(defun pf-nth-entry-filenme (n)
-  "Get the filename for the Nth entry."
-  (save-excursion
-    (goto-char (point-min))
-    (forward-line (1+ n))
-    (let ((start (point)))
+  (let ((n (- (event-basic-type last-command-event) ?0))
+        start end)
+    (save-excursion
+      (goto-char (point-min))
+      (forward-line (1+ n))
+      (setq start (point))
       (end-of-line)
-      (buffer-substring-no-properties start (point)))))
-
-(defun pf-find-nth-entry (&optional n)
-  "Find the Nth entry.  If N is nil find first entery."
-  (interactive "p")
-  (pf-find-file (pf-nth-entry-filenme (or n 1))))
+      (setq end (point)))
+    (pf-find-entery-at start end)))
 
 (defun pf-process-sentinel (_process event)
   "Handle koru_find EVENT."
@@ -430,23 +448,31 @@ Opens the selected line if N is nil or 0."
   (when (process-live-p pf-process)
     (delete-process pf-process)))
 
-(defun pf (&optional ignore dir)
-  "Do incremental search using `project-find'.
-Start pf with an IGNORE pattern.  If DIR is nil use `default-directory'."
-  (interactive)
+(defun pf-init ()
+  "Initialize and switch to the project-find buffer."
   (when-let* ((cwin (get-buffer-window))
               (win (get-buffer-window pf-buffer-name t)))
     (select-window win t)
     (switch-to-prev-buffer nil 'kill)
     (bury-buffer-internal (pf-get-buffer-create))
     (select-window cwin t))
-  (pf-get-process)
   (switch-to-buffer (pf-get-buffer-create) t t)
   (setq-local left-margin-width 2)
-  (setq pf--filter-text "")
+  (setq pf-find-function nil
+        pf-filter-changed-function nil
+        pf--filter-text "")
+  (use-local-map project-find-mode-map)
   (set-window-buffer nil (pf-get-buffer-create))
+  (pf-window-size (- (window-text-height) 2)))
+
+(defun pf (&optional ignore dir)
+  "Do incremental search using `project-find'.
+Start pf with an IGNORE pattern.  If DIR is nil use `default-directory'."
+  (interactive)
+  (pf-get-process)
+  (pf-init)
+
   (when ignore (pf-ignore ignore))
-  (pf-window-size (- (window-text-height) 2))
   (pf-cd (or dir default-directory)))
 
 (defun pf-clear-output ()
@@ -497,7 +523,7 @@ Returns the start of the selection."
   (interactive "p")
   (save-excursion
     (setq n (or n 1))
-    (let ((start (overlay-start pf--selected-overlay)))
+    (let ((start (pf-selected-start)))
       (unless start
         (setq start (pf--recalc-selected)))
       (when start
