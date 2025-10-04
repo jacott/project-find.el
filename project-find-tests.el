@@ -1,5 +1,26 @@
-;;; project-find-tests.el --- ERT tests for project-find.el  -*- lexical-binding: t; -*-
-
+;; project-find-tests.el --- ERT tests for project-find  -*- lexical-binding: t; -*-
+;;
+;; Copyright (C) 2025 Geoff Jacobsen <geoffjacobsen@gmail.com>
+;;
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;;
+;; project-find is free software: you can redistribute it and/or modify it
+;; under the terms of the GNU General Public License as published by the Free
+;; Software Foundation, either version 3 of the License, or (at your option) any
+;; later version.
+;;
+;; project-find is distributed in the hope that it will be useful, but
+;; WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+;; FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+;; more details.
+;;
+;; You should have received a copy of the GNU General Public License along with
+;; Unit-test-runner.  If not, see <https://www.gnu.org/licenses/>.
+;;
+;;
+;;; Commentary:
+;; ERT tests for project-find
+;;
 ;;; Code:
 
 (require 'ert)
@@ -80,6 +101,45 @@
   (should (equal (propertize "Filter: " 'face 'pf-filter-prompt-face)
                  (plist-get pf--filter-properties 'line-prefix))))
 
+
+(ert-deftest pf-build-regex ()
+  (pf-my-test-fixture
+   (should (equal (pf-build-regex "abc") "a.*b.*c.*"))
+   ))
+
+
+
+(ert-deftest pf-find-project ()
+
+  (pf-my-test-fixture
+   (let ((proots (lambda ()
+                   '("p/1/p3/" "test/1/" "p/1/p1/")))
+         open-dir)
+
+     (defun pf-my-open-project-command (dir)
+       "Testing function."
+       (setq open-dir dir))
+
+     (defun pf-my-too-late-open-project-command (_dir)
+       "Testing function."
+       (setq open-dir nil))
+
+     (unwind-protect
+         (progn
+           (advice-add #'project-known-project-roots :override proots)
+
+           (pf-find-project)
+           (setq-local pf-find-project-open-commands
+                       '(pf-my-non-existant-function pf-my-open-project-command
+                                                     pf-my-too-late-open-project-command dired))
+           (pf-goto-results)
+           (should (looking-at "p/1/p1"))
+           (pf-my-add-keys "t/1")
+           (pf-goto-results)
+           (should (looking-at "test/1/"))
+           (pf-find-selected)
+           (should (string-suffix-p "test/1/" open-dir)))
+       (advice-remove #'project-known-project-roots proots)))))
 
 (ert-deftest pf ()
   (pf-my-test-fixture

@@ -35,6 +35,11 @@
   :type 'string
   :group 'project-find)
 
+(defcustom pf-find-project-open-commands (list 'magit-status #'dired)
+  "Functions used to open a project first that exists is used."
+  :type 'hook
+  :group 'project-find)
+
 (defvar pf-process nil
   "Process for finding files and content.")
 
@@ -43,6 +48,9 @@
 
 (defvar pf-process-output ""
   "Buffer for process output.")
+
+(defvar pf-filter-re ""
+  "The Regexp used to filter `project-find' results")
 
 (defvar-local pf--filter-text ""
   "Text to filter the items found.")
@@ -536,6 +544,65 @@ Returns the start of the selection."
             (when (> (point) p)
               (setq pf--selected-lineno (+ pf--selected-lineno n))
               (move-overlay pf--selected-overlay p (point)))))))))
+
+(defun pf-build-regex (text)
+  "Build `pf-filter-re' from TEXT."
+  (setq pf-filter-re
+        (concat
+         (mapconcat (lambda (char)
+                      (regexp-quote (char-to-string char)))
+                    text
+                    ".*")
+         ".*")))
+
+(defun pf-find-project-open-project (start end)
+  "Find project listed in `project-find' buffer between START and END.
+This function is used to override `pf-find-function' and assumes that it
+is always called from the `project-find' buffer."
+  (let  ((path (buffer-substring-no-properties start end))
+         (cmd (seq-find (lambda (elt) (functionp elt)) pf-find-project-open-commands)))
+    (pf-quit)
+    (funcall cmd  path)))
+
+(defun pf-find-project-filter-changed (text _original)
+  "Update `pf-find-project' results with new filter TEXT."
+  (let ((inhibit-modification-hooks t)
+        (inhibit-read-only t))
+    (pf-build-regex text)
+    (pf-find-project-list-projects)))
+
+(defun pf-find-project-list-projects ()
+  "List projects matching TEXT filter using `pf-find-project'."
+  (let ((inhibit-modification-hooks t)
+        (inhibit-read-only t))
+    (save-excursion
+    (let ((inhibit-modification-hooks t)
+          (inhibit-read-only t))
+      (pf-goto-results)
+      (delete-region (point) (point-max))
+      (mapc (lambda (path)
+              (when (string-match-p pf-filter-re path)
+                (pf-add-line path)))
+            (project-known-project-roots))
+      (pf-goto-results)
+      (pf-post-process-filter (point) 0)))))
+
+(defun pf-find-project ()
+  "List all projects."
+  (interactive)
+  (let ((inhibit-modification-hooks t)
+        (inhibit-read-only t)
+        (dir default-directory))
+    (pf-init)
+    ;; fixme! (use-local-map pf-find-project-local-map)
+
+    (setq default-directory dir
+          pf-filter-re ""
+          pf-find-function #'pf-find-project-open-project
+          pf-filter-changed-function #'pf-find-project-filter-changed)
+    (pf-clear-output)
+    (pf-find-project-list-projects)))
+
 
 (provide 'project-find)
 

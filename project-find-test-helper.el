@@ -15,6 +15,7 @@ FORMAT-STRING and ARGS are passed to `format'."
   "A fixture to set up a common environment for tests.  BODY is the test code."
   `(let ((inhibit-message t)
          (pf--update-count 0)
+         (pf-filter-re "")
          (pf-command (concat (file-name-directory
                               (find-lisp-object-file-name #'pf nil))
                              "/koru_find")))
