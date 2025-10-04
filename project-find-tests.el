@@ -207,7 +207,7 @@
 
 (ert-deftest pf-with-ignore ()
   (pf-my-test-fixture
-   (pf ">3.txt" "test")
+   (pf "test" ">3.txt")
    (pf-my-add-keys "1")
 
    (save-excursion

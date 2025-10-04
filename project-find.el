@@ -473,7 +473,7 @@ Opens the selected line if N is nil or 0."
   (set-window-buffer nil (pf-get-buffer-create))
   (pf-window-size (- (window-text-height) 2)))
 
-(defun pf (&optional ignore dir)
+(defun pf (&optional dir ignore)
   "Do incremental search using `project-find'.
 Start pf with an IGNORE pattern.  If DIR is nil use `default-directory'."
   (interactive)
