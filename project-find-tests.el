@@ -101,16 +101,13 @@
   (should (equal (propertize "Filter: " 'face 'pf-filter-prompt-face)
                  (plist-get pf--filter-properties 'line-prefix))))
 
-
 (ert-deftest pf-build-regex ()
   (pf-my-test-fixture
-   (should (equal (pf-build-regex "abc") "a.*b.*c.*"))
+   (should (equal (pf-build-regex "abc") "a[^/]*b[^/]*c[^/]*"))
+   (should (equal (pf-build-regex "a\\s[b]*c") "a[^/]* [^/]*\\[[^/]*b[^/]*][^/]*\\*[^/]*c[^/]*"))
    ))
 
-
-
 (ert-deftest pf-find-project ()
-
   (pf-my-test-fixture
    (let ((proots (lambda ()
                    '("p/1/p3/" "test/1/" "p/1/p1/")))

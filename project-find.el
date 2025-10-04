@@ -50,7 +50,7 @@
   "Buffer for process output.")
 
 (defvar pf-filter-re ""
-  "The Regexp used to filter `project-find' results")
+  "The Regexp used to filter `project-find' results.")
 
 (defvar-local pf--filter-text ""
   "Text to filter the items found.")
@@ -547,13 +547,24 @@ Returns the start of the selection."
 
 (defun pf-build-regex (text)
   "Build `pf-filter-re' from TEXT."
-  (setq pf-filter-re
-        (concat
-         (mapconcat (lambda (char)
-                      (regexp-quote (char-to-string char)))
-                    text
-                    ".*")
-         ".*")))
+  (let ((esc nil))
+    (setq pf-filter-re
+          (mapconcat
+           (lambda (c)
+             (if (or esc (not (eq c ?\\)))
+                 (progn
+                   (when esc
+                     (setq esc nil)
+                     (when (eq c ?s)
+                       (setq c ?\s)))
+                   (if (eq c ?/)
+                       "/.*"
+                     (concat (regexp-quote (char-to-string c)) "[^/]*")))
+               (setq esc t)
+               ""
+               ))
+           text))))
+
 
 (defun pf-find-project-open-project (start end)
   "Find project listed in `project-find' buffer between START and END.
