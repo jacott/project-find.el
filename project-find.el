@@ -35,7 +35,7 @@
   :type 'string
   :group 'project-find)
 
-(defcustom pf-find-project-open-commands (list 'magit-status #'dired)
+(defcustom pf-find-project-open-commands (list #'pf 'magit-status #'dired)
   "Functions used to open a project first that exists is used."
   :type 'hook
   :group 'project-find)
