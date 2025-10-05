@@ -31,6 +31,70 @@
 (require 'project)
 (require 'project-find-test-helper)
 
+(ert-deftest pf ()
+  (pf-my-test-fixture
+   (pf)
+   (should (eq buffer-read-only t))
+   (should (eq (current-buffer) (get-buffer pf-buffer-name)))
+   (should (eq (get-buffer-process (current-buffer)) (pf-get-process)))
+   (pf-cd "test")
+
+   (goto-char (point-min))
+
+   (pf-my-add-keys "1")
+   (should (= (point) (1- (overlay-start pf--dir-overlay))))
+
+   (goto-char (point-min))
+
+   (should (looking-at "1"))
+   (should (equal (text-properties-at (point))
+                  pf--filter-properties))
+
+   (save-excursion
+     (pf--wait-for
+      (lambda ()
+        (goto-char (point-min))
+        (should (search-forward "1/2.txt"))
+        (forward-line 1)
+        (should (when-let* ((ol (car (overlays-at (point))))
+                            (p (overlay-get ol 'face)));
+                  (eq p 'pf-common-prefix-face)))
+        (should (when-let* ((ol (car (overlays-in (point) (point))))
+                            (p (overlay-get ol 'before-string))
+                            (m (get-text-property 0 'display p)))
+                  (should (equal m '((margin left-margin) "2")))
+                  (equal p " ")))
+        (should (search-forward "1/3.txt")))))
+   (let ((count (1+ pf--update-count)))
+     (pf-cd "test/1")
+     (pf--wait-for (lambda ()
+                     (>= pf--update-count count))))
+
+
+   (goto-char (point-max))
+   (pf-my-add-keys "2")
+   (should (= (point) (1- (overlay-start pf--dir-overlay))))
+
+   (pf)
+   (pf-cd "test/1")
+   (pf-my-add-keys "2")
+
+   (save-excursion (pf--wait-for (lambda ()
+                                   (goto-char (point-min))
+                                   ( should (search-forward "2.txt")))))
+
+   (pf-backward-delete-char 1)
+
+   (pf-my-add-keys "3")
+   (pf-my-add-keys "t")
+
+   (save-excursion
+     (should (pf--wait-for (lambda ()
+                             (goto-char (point-min))
+                             (search-forward "3.txt" nil t)
+                             (forward-line 0)
+                             (looking-at "3.txt")))))))
+
 (ert-deftest pf-get-process ()
   (pf-my-test-fixture
    (let ((proc (pf-get-process)))
@@ -66,6 +130,7 @@
    (switch-to-buffer (pf-get-buffer-create) t t)
    (let ((buffer-read-only nil)
          (inhibit-modification-hooks t))
+     (pf-cd "")
      (pf-clear-output)
      (pf-add-line "test/1/2.txt")
      (pf-add-line "test/1/3.txt")
@@ -137,70 +202,6 @@
            (pf-find-selected)
            (should (string-suffix-p "test/1/" open-dir)))
        (advice-remove #'project-known-project-roots proots)))))
-
-(ert-deftest pf ()
-  (pf-my-test-fixture
-   (pf)
-   (should (eq buffer-read-only t))
-   (should (eq (current-buffer) (get-buffer pf-buffer-name)))
-   (should (eq (get-buffer-process (current-buffer)) (pf-get-process)))
-   (pf-cd "test")
-
-   (goto-char (point-min))
-
-   (pf-my-add-keys "1")
-   (should (= (point) (1- (overlay-start pf--dir-overlay))))
-
-   (goto-char (point-min))
-
-   (should (looking-at "1"))
-   (should (equal (text-properties-at (point))
-                  pf--filter-properties))
-
-   (save-excursion
-     (pf--wait-for
-      (lambda ()
-        (goto-char (point-min))
-        (should (search-forward "1/2.txt"))
-        (forward-line 1)
-        (should (when-let* ((ol (car (overlays-at (point))))
-                            (p (overlay-get ol 'face)));
-                  (eq p 'pf-common-prefix-face)))
-        (should (when-let* ((ol (car (overlays-in (point) (point))))
-                            (p (overlay-get ol 'before-string))
-                            (m (get-text-property 0 'display p)))
-                  (should (equal m '((margin left-margin) "2")))
-                  (equal p " ")))
-        (should (search-forward "1/3.txt")))))
-   (let ((count (1+ pf--update-count)))
-     (pf-cd "test/1")
-     (pf--wait-for (lambda ()
-                     (>= pf--update-count count))))
-
-
-   (goto-char (point-max))
-   (pf-my-add-keys "2")
-   (should (= (point) (1- (overlay-start pf--dir-overlay))))
-
-   (pf)
-   (pf-cd "test/1")
-   (pf-my-add-keys "2")
-
-   (save-excursion (pf--wait-for (lambda ()
-                                   (goto-char (point-min))
-                                   ( should (search-forward "2.txt")))))
-
-   (pf-backward-delete-char 1)
-
-   (pf-my-add-keys "3")
-   (pf-my-add-keys "t")
-
-   (save-excursion
-     (should (pf--wait-for (lambda ()
-                             (goto-char (point-min))
-                             (search-forward "3.txt" nil t)
-                             (forward-line 0)
-                             (looking-at "3.txt")))))))
 
 (ert-deftest pf-with-ignore ()
   (pf-my-test-fixture

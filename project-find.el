@@ -405,13 +405,17 @@ Opens the selected line if N is nil or 0."
     (delete-char (- n))))
 
 (defun pf-cd (dir)
-  "Change search to DIR."
-  (with-current-buffer (pf-get-buffer-create)
-    (setq default-directory dir)
-    (let ((current-count pf--update-count))
-      (process-send-string (pf-get-process) (format "cd %s\x00" dir))
-      (while (= current-count pf--update-count)
-        (sit-for 0.016)))))
+  "Change search to DIR relative to `project-root'."
+  (let* ((pr (project-current nil))
+         (root (if pr (project-root pr) default-directory)))
+    (with-current-buffer (pf-get-buffer-create)
+      (if (or (string-prefix-p "~/" dir) (string-prefix-p "/" dir))
+          (setq default-directory dir)
+        (setq default-directory (concat root dir))
+        (let ((current-count pf--update-count))
+          (process-send-string (pf-get-process) (format "cd %s\x00" default-directory))
+          (while (= current-count pf--update-count)
+            (sit-for 0.016)))))))
 
 (defun pf-window-size (size)
   "Set the window SIZE of the servier process."
@@ -429,14 +433,11 @@ Opens the selected line if N is nil or 0."
 
 (defun pf-get-buffer-create ()
   "Get or create pf-buffer."
-  (let* ((pr (project-current nil))
-         (root (if pr (project-root pr) default-directory))
-         (buf (get-buffer-create pf-buffer-name)))
+  (let* ((buf (get-buffer-create pf-buffer-name)))
     (with-current-buffer buf
-      (setq default-directory root)
-      (unless (eq major-mode #'project-find-mode)
-        (project-find-mode)))
-    buf))
+       (unless (eq major-mode #'project-find-mode)
+         (project-find-mode)))
+     buf))
 
 (defun pf-get-process ()
   "Get or start the koru_find program."
@@ -474,14 +475,17 @@ Opens the selected line if N is nil or 0."
   (pf-window-size (- (window-text-height) 2)))
 
 (defun pf (&optional dir ignore)
-  "Do incremental search using `project-find'.
-Start pf with an IGNORE pattern.  If DIR is nil use `default-directory'."
+  "Do incremental search using `project-find' from `project-root'.
+Start pf with an IGNORE pattern.  DIR will set the directory relative to
+`project-root'."
   (interactive)
-  (pf-get-process)
-  (pf-init)
+  (let ((buf (current-buffer)))
+    (pf-get-process)
+    (pf-init)
 
-  (when ignore (pf-ignore ignore))
-  (pf-cd (or dir default-directory)))
+    (when ignore (pf-ignore ignore))
+    (with-current-buffer buf
+      (pf-cd (or dir "")))))
 
 (defun pf-clear-output ()
   "Clear buffer output and redraw filter string."
