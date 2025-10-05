@@ -203,9 +203,30 @@
            (should (string-suffix-p "test/1/" open-dir)))
        (advice-remove #'project-known-project-roots proots)))))
 
+(ert-deftest pf-with-base-filter ()
+  (pf-my-test-fixture
+   (pf "test" :name "my-find" :base-filter "  >2.txt")
+   (pf-my-add-keys "1")
+   (should (equal pf--base-filter ">2.txt "))
+
+   (save-excursion
+     (pf--wait-for (lambda ()
+                     (pf-goto-results)
+                     (should (search-forward "1/2.txt" nil t))
+                     (forward-line 1)
+                     (should (not (search-forward "1/3.txt" nil t))))))
+
+   (pf "test/1")
+   (should (equal pf--base-filter ""))
+   (save-excursion
+     (pf--wait-for (lambda ()
+                     (pf-goto-results)
+                     (should (search-forward "3.txt")))))))
+
+
 (ert-deftest pf-with-ignore ()
   (pf-my-test-fixture
-   (pf "test" ">3.txt")
+   (pf "test" :name "my-find" :ignore ">3.txt")
    (pf-my-add-keys "1")
 
    (save-excursion

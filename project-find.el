@@ -40,16 +40,19 @@
   :type 'hook
   :group 'project-find)
 
+(defconst pf-buffer-name "*project-find*"
+  "Name of buffer for finding.")
+
 (defvar pf-process nil
   "Process for finding files and content.")
 
-(defvar pf-buffer-name "*project-find*"
-  "Name of buffer for finding.")
-
-(defvar pf-process-output ""
+(defvar-local pf-process-output ""
   "Buffer for process output.")
 
-(defvar pf-filter-re ""
+(defvar-local pf--base-filter ""
+  "Text used as base filter.")
+
+(defvar-local pf-filter-re ""
   "The Regexp used to filter `project-find' results.")
 
 (defvar-local pf--filter-text ""
@@ -78,6 +81,10 @@
   "Face for filter text."
   :group 'pf-faces)
 
+(defface pf-name-face '((t :inherit font-lock-operator-face))
+  "Face for name of find command."
+  :group 'pf-faces)
+
 (defface pf-filter-prompt-face '((t :inherit font-lock-keyword-face))
   "Face for filter text."
   :group 'pf-faces)
@@ -88,6 +95,9 @@
    'face 'pf-filter-face
    'line-prefix (propertize "Filter: " 'face 'pf-filter-prompt-face))
   "The prompt displayed before filter text.")
+
+(defvar-local pf--name (propertize "Find file: " 'face 'pf-name-face)
+  "The name of the type of find being performed.  See `pf-init'.")
 
 (defvar-local pf-find-function nil
   "Custom find function called when an entry is selected.")
@@ -142,7 +152,7 @@
   (setq-local after-change-functions '(pf-buffer-changed))
 
   (overlay-put pf--selected-overlay 'face 'pf-selected-face)
-  (overlay-put pf--dir-overlay 'face 'pf-dir-face))
+  (overlay-put pf--dir-overlay 'cursor-intangible t))
 
 (defun pf-buffer-changed (_start _end _old-len)
   "Hook that sends any changes of the filter to the back-end server."
@@ -153,7 +163,7 @@
       (pf-propertize-filter-text)
       (if pf-filter-changed-function
           (funcall pf-filter-changed-function text original)
-        (process-send-string (pf-get-process) (format "set 0 %s\x00" text))))))
+        (process-send-string (pf-get-process) (format "set %d %s\x00" (length pf--base-filter) text))))))
 
 (defun pf-process-filter (_proc output)
   "Display koru_find output.
@@ -384,7 +394,7 @@ Opens the selected line if N is nil or 0."
 
 (defun pf-filter-results ()
   "Filter the results using filter text."
-  (process-send-string (pf-get-process) (format "set 0 %s\x00" pf--filter-text)))
+  (process-send-string (pf-get-process) (format "set %d %s\x00" (length pf--base-filter) pf--filter-text)))
 
 (defun pf-self-filter-add ()
   "Add self to `project-find' search filter."
@@ -404,18 +414,29 @@ Opens the selected line if N is nil or 0."
   (let ((inhibit-read-only t))
     (delete-char (- n))))
 
-(defun pf-cd (dir)
-  "Change search to DIR relative to `project-root'."
-  (let* ((pr (project-current nil))
-         (root (if pr (project-root pr) default-directory)))
-    (with-current-buffer (pf-get-buffer-create)
-      (if (or (string-prefix-p "~/" dir) (string-prefix-p "/" dir))
-          (setq default-directory dir)
-        (setq default-directory (concat root dir))
-        (let ((current-count pf--update-count))
-          (process-send-string (pf-get-process) (format "cd %s\x00" default-directory))
-          (while (= current-count pf--update-count)
-            (sit-for 0.016)))))))
+(defun pf-root-dir (&optional dir buf)
+  "Convert DIR to full-path relative to `project-root'.
+If DIR is a full-path aleady return unchanged otherwise convert relative
+to `project-root' (or `default-directory' if none) for BUF, defualt to
+`current-buffer'."
+  (if (or (string-prefix-p "~/" dir) (string-prefix-p "/" dir))
+      dir
+    (with-current-buffer (or buf (current-buffer))
+      (concat
+       (let ((pr (project-current nil)))
+         (if pr (project-root pr) default-directory))
+       dir))))
+
+(defun pf-cd (dir &optional buf)
+  "Change search to DIR using `pf-root-dir'.
+BUF is passed to `pf-root-dir' for releativ paths."
+  (setq dir (pf-root-dir dir buf))
+  (with-current-buffer (pf-get-buffer-create)
+    (setq default-directory dir)
+    (let ((current-count pf--update-count))
+      (process-send-string (pf-get-process) (format "cd %s\x00" default-directory))
+      (while (= current-count pf--update-count)
+        (sit-for 0.016)))))
 
 (defun pf-window-size (size)
   "Set the window SIZE of the servier process."
@@ -424,6 +445,11 @@ Opens the selected line if N is nil or 0."
 (defun pf-ignore (ignore)
   "Set the IGNORE pattern."
   (process-send-string (pf-get-process) (format "ignore %s\x00" ignore)))
+
+(defun pf-base-filter (text)
+  "Set the TEXT used as a base filter."
+  (setq pf--base-filter (concat (string-trim text) " "))
+  (process-send-string (pf-get-process) (format "set 0 %s %s\x00" pf--base-filter pf--filter-text)))
 
 (defun pf-quit ()
   "Quit project find."
@@ -435,9 +461,11 @@ Opens the selected line if N is nil or 0."
   "Get or create pf-buffer."
   (let* ((buf (get-buffer-create pf-buffer-name)))
     (with-current-buffer buf
-       (unless (eq major-mode #'project-find-mode)
-         (project-find-mode)))
-     buf))
+      (unless (eq major-mode #'project-find-mode)
+        (project-find-mode)
+        (setq buffer-undo-list t)
+        (cursor-intangible-mode 1)))
+    buf))
 
 (defun pf-get-process ()
   "Get or start the koru_find program."
@@ -457,8 +485,9 @@ Opens the selected line if N is nil or 0."
   (when (process-live-p pf-process)
     (delete-process pf-process)))
 
-(defun pf-init ()
-  "Initialize and switch to the project-find buffer."
+(defun pf-init (&optional name)
+  "Initialize and switch to the project-find buffer.
+Display NAME on second line."
   (when-let* ((cwin (get-buffer-window))
               (win (get-buffer-window pf-buffer-name t)))
     (select-window win t)
@@ -467,25 +496,41 @@ Opens the selected line if N is nil or 0."
     (select-window cwin t))
   (switch-to-buffer (pf-get-buffer-create) t t)
   (setq-local left-margin-width 2)
+  (if name
+      (if (get-text-property 0 'face name)
+          (setq pf--name name)
+        (setq pf--name (propertize name 'face 'pf-name-face)))
+    (kill-local-variable 'pf--name))
   (setq pf-find-function nil
+        pf--base-filter ""
         pf-filter-changed-function nil
         pf--filter-text "")
   (use-local-map project-find-mode-map)
   (set-window-buffer nil (pf-get-buffer-create))
   (pf-window-size (- (window-text-height) 2)))
 
-(defun pf (&optional dir ignore)
+(defun pf (&optional dir &rest args)
   "Do incremental search using `project-find' from `project-root'.
-Start pf with an IGNORE pattern.  DIR will set the directory relative to
-`project-root'."
-  (interactive)
-  (let ((buf (current-buffer)))
-    (pf-get-process)
-    (pf-init)
+Start pf for the current buffer' `project-root'.  If DIR is not nil
+start searching from DIR, which can be relative to `project-root'.
+ARGS is keyword/argument pairs defined as follows:
 
+:name NAME -- Title to show in the buffer before DIR.
+
+:ignore IGNORE -- Pattern used to exclude files from results.
+
+:base-filter BASE_FILTER -- Pattern to require for file to be in
+results."
+  (interactive)
+  (let ((buf (current-buffer))
+        (ignore (plist-get args :ignore))
+        (base-filter (plist-get args :base-filter)))
+    (pf-get-process)
+    (pf-init (plist-get args :name))
+    (process-send-string (pf-get-process) "stop-search\x00")
     (when ignore (pf-ignore ignore))
-    (with-current-buffer buf
-      (pf-cd (or dir "")))))
+    (when base-filter (pf-base-filter base-filter))
+    (pf-cd (or dir "") buf)))
 
 (defun pf-clear-output ()
   "Clear buffer output and redraw filter string."
@@ -496,7 +541,9 @@ Start pf with an IGNORE pattern.  DIR will set the directory relative to
     (goto-char (point-min))
     (insert pf--filter-text "\n")
     (let ((start (point)))
-      (insert (format "%s\n" default-directory))
+      (insert pf--name
+              (propertize default-directory 'face 'pf-dir-face)
+              "\n")
       (move-overlay pf--dir-overlay start (point))
       (pf-propertize-filter-text)
       (goto-char (point-min))
@@ -591,27 +638,28 @@ is always called from the `project-find' buffer."
   (let ((inhibit-modification-hooks t)
         (inhibit-read-only t))
     (save-excursion
-    (let ((inhibit-modification-hooks t)
-          (inhibit-read-only t))
-      (pf-goto-results)
-      (delete-region (point) (point-max))
-      (mapc (lambda (path)
-              (when (string-match-p pf-filter-re path)
-                (pf-add-line path)))
-            (project-known-project-roots))
-      (pf-goto-results)
-      (pf-post-process-filter (point) 0)))))
+      (let ((inhibit-modification-hooks t)
+            (inhibit-read-only t))
+        (pf-goto-results)
+        (delete-region (point) (point-max))
+        (mapc (lambda (path)
+                (when (string-match-p pf-filter-re path)
+                  (pf-add-line path)))
+              (project-known-project-roots))
+        (pf-goto-results)
+        (pf-post-process-filter (point) 0)))))
 
 (defun pf-find-project ()
   "List all projects."
   (interactive)
   (let ((inhibit-modification-hooks t)
         (inhibit-read-only t)
-        (dir default-directory))
+        (dir (pf-root-dir)))
     (pf-init)
     ;; fixme! (use-local-map pf-find-project-local-map)
 
     (setq default-directory dir
+          pf--name (propertize "Find project: " 'face 'pf-name-face)
           pf-filter-re ""
           pf-find-function #'pf-find-project-open-project
           pf-filter-changed-function #'pf-find-project-filter-changed)
