@@ -43,9 +43,6 @@
 (defconst pf-buffer-name "*project-find*"
   "Name of buffer for finding.")
 
-(defvar pf-process nil
-  "Process for finding files and content.")
-
 (defvar-local pf-process-output ""
   "Buffer for process output.")
 
@@ -163,7 +160,11 @@
       (pf-propertize-filter-text)
       (if pf-filter-changed-function
           (funcall pf-filter-changed-function text original)
-        (process-send-string (pf-get-process) (format "set %d %s\x00" (length pf--base-filter) text))))))
+        (pf--process-send (format "set %d %s\x00" (length pf--base-filter) text))))))
+
+(defun pf--process-send (data)
+  "Send DATA to the project-find process."
+  (process-send-string (get-buffer-process (get-buffer pf-buffer-name)) data))
 
 (defun pf-process-filter (_proc output)
   "Display koru_find output.
@@ -372,8 +373,7 @@ Opens the selected line if N is nil or 0."
 
 (defun pf-process-sentinel (_process event)
   "Handle koru_find EVENT."
-  (message "pf-process %s" event)
-  (setq pf-process nil))
+  (message "pf-process %s" event))
 
 (defun pf-align-filter-input ()
   "Place cursor within filter input area."
@@ -394,7 +394,7 @@ Opens the selected line if N is nil or 0."
 
 (defun pf-filter-results ()
   "Filter the results using filter text."
-  (process-send-string (pf-get-process) (format "set %d %s\x00" (length pf--base-filter) pf--filter-text)))
+  (pf--process-send (format "set %d %s\x00" (length pf--base-filter) pf--filter-text)))
 
 (defun pf-self-filter-add ()
   "Add self to `project-find' search filter."
@@ -434,22 +434,22 @@ BUF is passed to `pf-root-dir' for releativ paths."
   (with-current-buffer (pf-get-buffer-create)
     (setq default-directory dir)
     (let ((current-count pf--update-count))
-      (process-send-string (pf-get-process) (format "cd %s\x00" default-directory))
+      (pf--process-send (format "cd %s\x00" default-directory))
       (while (= current-count pf--update-count)
         (sit-for 0.016)))))
 
 (defun pf-window-size (size)
   "Set the window SIZE of the servier process."
-  (process-send-string (pf-get-process) (format "window_size %s\x00" size)))
+  (pf--process-send (format "window_size %s\x00" size)))
 
 (defun pf-ignore (ignore)
   "Set the IGNORE pattern."
-  (process-send-string (pf-get-process) (format "ignore %s\x00" ignore)))
+  (pf--process-send (format "ignore %s\x00" ignore)))
 
 (defun pf-base-filter (text)
   "Set the TEXT used as a base filter."
   (setq pf--base-filter (concat (string-trim text) " "))
-  (process-send-string (pf-get-process) (format "set 0 %s %s\x00" pf--base-filter pf--filter-text)))
+  (pf--process-send (format "set 0 %s %s\x00" pf--base-filter pf--filter-text)))
 
 (defun pf-quit ()
   "Quit project find."
@@ -457,57 +457,40 @@ BUF is passed to `pf-root-dir' for releativ paths."
   (switch-to-prev-buffer nil 'kill)
   (bury-buffer-internal (pf-get-buffer-create)))
 
-(defun pf-get-buffer-create ()
-  "Get or create pf-buffer."
+(defun pf-get-buffer-create (&optional dir)
+  "Get or create pf-buffer setting `default-directory' to DIR."
   (let* ((buf (get-buffer-create pf-buffer-name)))
     (with-current-buffer buf
+      (when dir (setq default-directory dir))
       (unless (eq major-mode #'project-find-mode)
         (project-find-mode)
         (setq buffer-undo-list t)
         (cursor-intangible-mode 1)))
     buf))
 
-(defun pf-get-process ()
-  "Get or start the koru_find program."
-  (if (process-live-p pf-process)
-      pf-process
-    (setq pf-process (make-process :name "koru_find"
-                                   :command (list pf-command "--server")
-                                   :coding 'no-conversion
-                                   :noquery t
-                                   :buffer (pf-get-buffer-create)
-                                   :stderr "*koru_find::stderr*"
-                                   :connection-type 'pipe
-                                   :filter #'pf-process-filter
-                                   :sentinel #'pf-process-sentinel))))
-(defun pf-kill-process ()
-  "Kill any running koru_find program."
-  (when (process-live-p pf-process)
-    (delete-process pf-process)))
+(defun pf-kill-buffer ()
+  "Kill the project-find buffer."
+  (when (get-buffer pf-buffer-name)
+         (let ((kill-buffer-query-functions nil))
+           (kill-buffer "*project-find*"))))
 
 (defun pf-init (&optional name)
   "Initialize and switch to the project-find buffer.
-Display NAME on second line."
-  (when-let* ((cwin (get-buffer-window))
-              (win (get-buffer-window pf-buffer-name t)))
-    (select-window win t)
-    (switch-to-prev-buffer nil 'kill)
-    (bury-buffer-internal (pf-get-buffer-create))
-    (select-window cwin t))
-  (switch-to-buffer (pf-get-buffer-create) t t)
-  (setq-local left-margin-width 2)
-  (if name
-      (if (get-text-property 0 'face name)
-          (setq pf--name name)
-        (setq pf--name (propertize name 'face 'pf-name-face)))
-    (kill-local-variable 'pf--name))
-  (setq pf-find-function nil
-        pf--base-filter ""
-        pf-filter-changed-function nil
-        pf--filter-text "")
-  (use-local-map project-find-mode-map)
-  (set-window-buffer nil (pf-get-buffer-create))
-  (pf-window-size (- (window-text-height) 2)))
+Set the NAME for the type of find initialized."
+  (let ((cdir default-directory))
+    (pf-kill-buffer)
+    (switch-to-buffer (pf-get-buffer-create cdir) t t)
+    (setq-local left-margin-width 2)
+    (if name
+        (if (get-text-property 0 'face name)
+            (setq pf--name name)
+          (setq pf--name (propertize name 'face 'pf-name-face)))
+      (kill-local-variable 'pf--name))
+    (setq pf-find-function nil
+          pf--base-filter ""
+          pf-filter-changed-function nil
+          pf--filter-text "")
+    (use-local-map project-find-mode-map)))
 
 (defun pf (&optional dir &rest args)
   "Do incremental search using `project-find' from `project-root'.
@@ -522,32 +505,47 @@ ARGS is keyword/argument pairs defined as follows:
 :base-filter BASE_FILTER -- Pattern to require for file to be in
 results."
   (interactive)
-  (let ((buf (current-buffer))
-        (ignore (plist-get args :ignore))
+  (let ((ignore (plist-get args :ignore))
         (base-filter (plist-get args :base-filter)))
-    (pf-get-process)
     (pf-init (plist-get args :name))
-    (process-send-string (pf-get-process) "stop-search\x00")
+    (pf--make-process)
     (when ignore (pf-ignore ignore))
     (when base-filter (pf-base-filter base-filter))
-    (pf-cd (or dir "") buf)))
+    (pf-window-size (- (window-text-height) 2))
+    (pf-clear-output)
+    (pf-cd (or dir ""))))
+
+(defun pf--make-process ()
+  "Start the koru_find program."
+  (make-process :name "koru_find"
+                :command (list pf-command "--server")
+                :coding 'no-conversion
+                :noquery t
+                :buffer (current-buffer)
+                :stderr "*koru_find::stderr*"
+                :connection-type 'pipe
+                :filter #'pf-process-filter
+                :sentinel #'pf-process-sentinel))
 
 (defun pf-clear-output ()
   "Clear buffer output and redraw filter string."
   (with-current-buffer (pf-get-buffer-create)
-    (erase-buffer)
-    (remove-overlays)
-    (setq pf--selected-lineno 0)
-    (goto-char (point-min))
-    (insert pf--filter-text "\n")
-    (let ((start (point)))
-      (insert pf--name
-              (propertize default-directory 'face 'pf-dir-face)
-              "\n")
-      (move-overlay pf--dir-overlay start (point))
-      (pf-propertize-filter-text)
+    (let ((inhibit-modification-hooks t)
+          (inhibit-read-only t))
+
+      (erase-buffer)
+      (remove-overlays)
+      (setq pf--selected-lineno 0)
       (goto-char (point-min))
-      nil)))
+      (insert pf--filter-text "\n")
+      (let ((start (point)))
+        (insert pf--name
+                (propertize default-directory 'face 'pf-dir-face)
+                "\n")
+        (move-overlay pf--dir-overlay start (point))
+        (pf-propertize-filter-text)
+        (goto-char (point-min))
+        nil))))
 
 (defun pf-backward-line (&optional n)
   "Select Nth line from current."

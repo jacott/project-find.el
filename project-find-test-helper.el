@@ -22,10 +22,7 @@ FORMAT-STRING and ARGS are passed to `format'."
      (unwind-protect
          (progn ,@body)
 
-       (pf-kill-process)
-       (when (get-buffer "*project-find")
-         (let ((kill-buffer-query-functions nil))
-           (kill-buffer "*project-find*"))))))
+       (pf-kill-buffer))))
 
 (defun pf-my-add-keys (keys &optional ready-test time)
   "Add KEYS via `pf-self-filter-add'.

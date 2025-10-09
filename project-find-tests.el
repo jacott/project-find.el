@@ -36,7 +36,6 @@
    (pf)
    (should (eq buffer-read-only t))
    (should (eq (current-buffer) (get-buffer pf-buffer-name)))
-   (should (eq (get-buffer-process (current-buffer)) (pf-get-process)))
    (pf-cd "test")
 
    (goto-char (point-min))
@@ -75,8 +74,7 @@
    (pf-my-add-keys "2")
    (should (= (point) (1- (overlay-start pf--dir-overlay))))
 
-   (pf)
-   (pf-cd "test/1")
+   (pf "test/1")
    (pf-my-add-keys "2")
 
    (save-excursion (pf--wait-for (lambda ()
@@ -84,7 +82,6 @@
                                    ( should (search-forward "2.txt")))))
 
    (pf-backward-delete-char 1)
-
    (pf-my-add-keys "3")
    (pf-my-add-keys "t")
 
@@ -94,15 +91,6 @@
                              (search-forward "3.txt" nil t)
                              (forward-line 0)
                              (looking-at "3.txt")))))))
-
-(ert-deftest pf-get-process ()
-  (pf-my-test-fixture
-   (let ((proc (pf-get-process)))
-     (should proc)
-     (should (eq proc (pf-get-process)))
-     (pf-kill-process)
-     (should (not (eq proc (pf-get-process)))))))
-
 
 (ert-deftest pf-process-filter ()
   (pf-my-test-fixture
@@ -114,11 +102,11 @@
      (unwind-protect
          (progn
            (advice-add #'pf-process-line :override pline)
-           (pf-process-filter (pf-get-process) "+testing")
-           (pf-process-filter (pf-get-process) "/123\x00+testing/45")
-           (pf-process-filter (pf-get-process) "\x00")
-           (pf-process-filter (pf-get-process) "-testz/13\x00")
-           (pf-process-filter (pf-get-process) "-testz/56\x00")
+           (pf-process-filter nil "+testing")
+           (pf-process-filter nil "/123\x00+testing/45")
+           (pf-process-filter nil "\x00")
+           (pf-process-filter nil "-testz/13\x00")
+           (pf-process-filter nil "-testz/56\x00")
            (should (equal (cadddr lines) "+testing/123"))
            (should (equal (caddr lines) "+testing/45"))
            (should (equal (cadr lines) "-testz/13"))
@@ -130,7 +118,6 @@
    (switch-to-buffer (pf-get-buffer-create) t t)
    (let ((buffer-read-only nil)
          (inhibit-modification-hooks t))
-     (pf-cd "")
      (pf-clear-output)
      (pf-add-line "test/1/2.txt")
      (pf-add-line "test/1/3.txt")
@@ -138,12 +125,9 @@
        (pf-find-entry))
      (should (equal (buffer-name) "3.txt")))))
 
-
-
 (ert-deftest pf-select-disapearing ()
   (pf-my-test-fixture
    (pf)
-
    (save-excursion
      (pf--wait-for
       (lambda ()
@@ -201,7 +185,8 @@
            (should (looking-at "test/1/"))
            (pf-find-selected)
            (should (string-suffix-p "test/1/" open-dir)))
-       (advice-remove #'project-known-project-roots proots)))))
+       (advice-remove #'project-known-project-roots proots))))
+  (should (not (get-buffer pf-buffer-name))))
 
 (ert-deftest pf-with-base-filter ()
   (pf-my-test-fixture
