@@ -458,7 +458,10 @@ Opens the selected line if N is nil or 0."
 
 (defun pf-process-sentinel (_process event)
   "Handle koru_find EVENT."
-  (message "pf-process %s" event))
+  (cond
+   ((string-prefix-p "hangup" event))
+   (t (message "pf-process %s" event)))
+   )
 
 (defun pf-align-filter-input ()
   "Place cursor within filter input area."
@@ -567,6 +570,7 @@ Set the NAME for the type of find initialized."
     (switch-to-buffer (pf-get-buffer-create cdir) t t)
     (setq-local left-margin-width 2)
     (set-window-buffer nil (pf-get-buffer-create))
+    (pf--make-process)
     (if name
         (if (get-text-property 0 'face name)
             (setq pf--name name)
@@ -595,7 +599,6 @@ OPTIONS can be given as keywords.  Available keywords are:
   (let ((ignore (plist-get options :ignore))
         (base-filter (plist-get options :base-filter)))
     (pf-init (plist-get options :name))
-    (pf--make-process)
     (when ignore (pf-ignore ignore))
     (when base-filter (pf-base-filter base-filter))
     (pf-window-size (- (window-text-height) 2))
@@ -609,7 +612,7 @@ OPTIONS can be given as keywords.  Available keywords are:
                 :coding 'no-conversion
                 :noquery t
                 :buffer (current-buffer)
-                :stderr "*koru_find::stderr*"
+                :stderr nil
                 :connection-type 'pipe
                 :filter #'pf-process-filter
                 :sentinel #'pf-process-sentinel))
