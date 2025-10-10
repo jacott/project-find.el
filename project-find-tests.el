@@ -92,9 +92,10 @@
    (pf "test/1")
    (pf-my-add-keys "2")
 
-   (save-excursion (pf--wait-for (lambda ()
-                                   (goto-char (point-min))
-                                   ( should (search-forward "2.txt")))))
+   (save-excursion
+     (should (pf--wait-for (lambda ()
+                             (goto-char (point-min))
+                             (search-forward "2.txt")))))
 
    (pf-backward-delete-char 1)
    (pf-my-add-keys "3")
@@ -194,10 +195,31 @@
                        '(pf-my-non-existant-function pf-my-open-project-command
                                                      pf-my-too-late-open-project-command dired))
            (pf-goto-results)
-           (should (looking-at "p/1/p1"))
+           (save-excursion
+             (should
+              (pf--wait-for (lambda ()
+                              (pf-goto-results)
+                              (search-forward "p/1/p1" nil t)))))
+
            (pf-my-add-keys "t/1")
            (pf-goto-results)
-           (should (looking-at "test/1/"))
+
+           (save-excursion
+             (should
+              (pf--wait-for (lambda ()
+                              (pf-goto-results)
+                              (not (search-forward "p/1" nil t))))))
+
+           (pf-backward-delete-char 3)
+
+           (save-excursion
+             (should
+              (pf--wait-for (lambda ()
+                              (pf-goto-results)
+                              (search-forward "p/1" nil t)))))
+
+           (pf-forward-line 2)
+
            (pf-find-selected)
            (should (string-suffix-p "test/1/" open-dir)))
        (advice-remove #'project-known-project-roots proots))))

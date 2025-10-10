@@ -102,6 +102,9 @@
 (defvar-local pf-find-function nil
   "Custom find function called when an entry is selected.")
 
+(defvar-local pf-resync-function nil
+  "Custom function to resync the matched lines.")
+
 (defvar-local pf-filter-changed-function nil
   "Custom function to handle updating search results when the filter changes.")
 
@@ -192,8 +195,7 @@ b  toggle matching only if corresponding buffer
   "Toggle only showing files that have a corresponding buffer."
   (interactive)
   (setq pf-matching-buffer (not pf-matching-buffer))
-  (pf-option-menu)
-  (pf-redraw))
+  (pf-option-menu))
 
 (defun pf-buffer-changed (_start _end _old-len)
   "Hook that sends any changes of the filter to the back-end server."
@@ -234,10 +236,15 @@ OUTPUT contains data from the process."
      ((eq c ?c) (pf-clear-output))
      ((eq c ?+) (pf-add-line (substring line 1)))
      ((eq c ?-) (pf-rm-line (substring line 1)))
+     ((eq c ?r) (progn (funcall (or pf-resync-function #'ignore)) nil))
      ((eq c ?s) (ignore))
      ((eq c ?m) (progn (message "project-find: %s" line) nil))
      ((eq c ?d) (ignore))
      (t (error "Unknown command %S" line)))))
+
+(defun pf-match-line (line)
+  "Check if LINE matches filter."
+  (pf--process-send (concat "match " line "\x00")))
 
 (defun pf-add-line (line)
   "Insert LINE into buffer.  Return pos and lineo of insertion."
@@ -461,7 +468,7 @@ Opens the selected line if N is nil or 0."
   (cond
    ((string-prefix-p "hangup" event))
    (t (message "pf-process %s" event)))
-   )
+  )
 
 (defun pf-align-filter-input ()
   "Place cursor within filter input area."
@@ -571,6 +578,7 @@ Set the NAME for the type of find initialized."
     (setq-local left-margin-width 2)
     (set-window-buffer nil (pf-get-buffer-create))
     (pf--make-process)
+    (pf-window-size (- (window-text-height) 2))
     (if name
         (if (get-text-property 0 'face name)
             (setq pf--name name)
@@ -601,7 +609,6 @@ OPTIONS can be given as keywords.  Available keywords are:
     (pf-init (plist-get options :name))
     (when ignore (pf-ignore ignore))
     (when base-filter (pf-base-filter base-filter))
-    (pf-window-size (- (window-text-height) 2))
     (pf-clear-output)
     (pf-walk (or dir ""))))
 
@@ -714,28 +721,10 @@ is always called from the `project-find' buffer."
     (pf-quit)
     (funcall cmd  path)))
 
-(defun pf-find-project-filter-changed (text _original)
-  "Update `pf-find-project' results with new filter TEXT."
-  (let ((inhibit-modification-hooks t)
-        (inhibit-read-only t))
-    (pf-build-regex text)
-    (pf-find-project-list-projects)))
 
 (defun pf-find-project-list-projects ()
   "List projects matching TEXT filter using `pf-find-project'."
-  (let ((inhibit-modification-hooks t)
-        (inhibit-read-only t))
-    (save-excursion
-      (let ((inhibit-modification-hooks t)
-            (inhibit-read-only t))
-        (pf-goto-results)
-        (delete-region (point) (point-max))
-        (mapc (lambda (path)
-                (when (string-match-p pf-filter-re path)
-                  (pf-add-line path)))
-              (project-known-project-roots))
-        (pf-goto-results)
-        (pf-post-process-filter (point) 0)))))
+  (mapc #'pf-match-line (project-known-project-roots)))
 
 (defun pf-find-project ()
   "List all projects."
@@ -743,14 +732,12 @@ is always called from the `project-find' buffer."
   (let ((inhibit-modification-hooks t)
         (inhibit-read-only t)
         (dir (pf-root-dir)))
-    (pf-init)
+    (pf-init (propertize "Find project: " 'face 'pf-name-face))
     ;; fixme! (use-local-map pf-find-project-local-map)
 
     (setq default-directory dir
-          pf--name (propertize "Find project: " 'face 'pf-name-face)
-          pf-filter-re ""
           pf-find-function #'pf-find-project-open-project
-          pf-filter-changed-function #'pf-find-project-filter-changed)
+          pf-resync-function #'pf-find-project-list-projects)
     (pf-clear-output)
     (pf-find-project-list-projects)))
 
