@@ -468,14 +468,14 @@ to `project-root' (or `default-directory' if none) for BUF, defualt to
          (if pr (project-root pr) default-directory))
        dir))))
 
-(defun pf-cd (dir &optional buf)
-  "Change search to DIR using `pf-root-dir'.
-BUF is passed to `pf-root-dir' for releativ paths."
+(defun pf-walk (dir &optional buf)
+  "Start file search from DIR relative to `pf-root-dir'.
+BUF is passed to `pf-root-dir' for relative paths."
   (setq dir (pf-root-dir dir buf))
   (with-current-buffer (pf-get-buffer-create)
     (setq default-directory dir)
     (let ((current-count pf--update-count))
-      (pf--process-send (format "cd %s\x00" default-directory))
+      (pf--process-send (format "walk %s\x00" default-directory))
       (while (= current-count pf--update-count)
         (sit-for 0.016)))))
 
@@ -555,7 +555,7 @@ results."
     (when base-filter (pf-base-filter base-filter))
     (pf-window-size (- (window-text-height) 2))
     (pf-clear-output)
-    (pf-cd (or dir ""))))
+    (pf-walk (or dir ""))))
 
 (defun pf--make-process ()
   "Start the koru_find program."

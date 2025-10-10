@@ -36,7 +36,7 @@
    (pf)
    (should (eq buffer-read-only t))
    (should (eq (current-buffer) (get-buffer pf-buffer-name)))
-   (pf-cd "test")
+   (pf-walk "test")
 
    (goto-char (point-min))
 
@@ -65,7 +65,7 @@
                   (equal p " ")))
         (should (search-forward "1/3.txt")))))
    (let ((count (1+ pf--update-count)))
-     (pf-cd "test/1")
+     (pf-walk "test/1")
      (pf--wait-for (lambda ()
                      (>= pf--update-count count))))
 
@@ -221,7 +221,7 @@
                      (forward-line 1)
                      (should (not (search-forward "1/3.txt" nil t))))))
 
-   (pf-cd "test/1")
+   (pf-walk "test/1")
    (save-excursion
      (pf--wait-for (lambda ()
                      (pf-goto-results)
