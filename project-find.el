@@ -199,17 +199,9 @@ OUTPUT contains data from the process."
   "Insert LINE into buffer.  Return pos and lineo of insertion."
   (with-current-buffer (pf-get-buffer-create)
     (save-excursion
-      (pf-goto-results)
-      (let* ((lineno 0)
-             (start (point))
-             (end (progn (forward-line 1) (point))))
-        (while (and
-                (< start end)
-                (string> line (buffer-substring-no-properties start (1- end))))
-          (setq lineno (1+ lineno))
-          (setq start end)
-          (setq end (progn (forward-line 1) (point ))))
-        (goto-char start)
+      (pf-find-location line)
+      (let ((start (point))
+            (lineno (or (pf--margin-lineno-before-point) 10)))
         (insert line "\n")
         (pf--set-common-prefix)
         (when (not (eobp))
@@ -217,27 +209,76 @@ OUTPUT contains data from the process."
           (pf--set-common-prefix))
         (cons start lineno)))))
 
+(defun pf-find-location (line)
+  "Perform a binary search for LINE."
+  (let ((key-start (overlay-end pf--dir-overlay))
+        (key-end (point-max))
+        (search-result nil)
+        (mid-char-pos 0)
+        (current-line-start 0)
+        (current-line-end 0)
+        (current-line-string 0))
+
+    (while (< key-start key-end)
+      (setq mid-char-pos (+ key-start (/ (- key-end key-start) 2))
+            current-line-start (progn (goto-char mid-char-pos)
+                                      (forward-line 0)
+                                      (point))
+            current-line-end (progn (goto-char mid-char-pos)
+                                    (forward-line 1)
+                                    (point))
+            current-line-string (buffer-substring-no-properties
+                                 current-line-start
+                                 (1- current-line-end))
+            search-result (compare-strings line nil nil
+                                           current-line-string nil nil))
+
+      (cond
+       ((eq search-result t) ; search-result is 0: Found it!
+        (setq key-start current-line-start
+              key-end current-line-start))
+       ((< search-result 0) ; Search string is LESS than current line
+        (setq key-end current-line-start))
+
+       (t ; Search string is GREATER than current line
+        (setq key-start current-line-end))))
+    (goto-char key-start)
+    search-result))
+
+(defun pf--margin-lineno-before-point ()
+  "Get margin lineno at `point' if any."
+  (let ((start (point)))
+    (if (= (overlay-end pf--dir-overlay) start)
+        0
+      (forward-line -1)
+      (goto-char start)
+
+      (let ((ovs (overlays-in (point) (point)))
+            lineno)
+        (while ovs
+          (setq lineno (overlay-get (car ovs) 'before-string))
+          (if lineno
+              (setq ovs nil
+                    lineno (1- (string-to-number (cadr (get-text-property 0 'display lineno)))))
+            (setq ovs (cdr ovs)))
+          )
+        lineno))))
+
 (defun pf-rm-line (line)
   "Remove LINE from buffer.  Return pos and lineno of removal."
   (with-current-buffer (pf-get-buffer-create)
     (save-excursion
-      (pf-goto-results)
-      (let ((start (point))
-            (end (progn (forward-line 1) (point)))
-            (lineno 0))
-        (while (and
-                (< start end)
-                (string> line (buffer-substring start (1- end))))
-          (setq lineno (1+ lineno))
-          (setq start end)
-          (setq end (progn (forward-line 1) (point))))
-        (when (string= line (buffer-substring-no-properties start (1- end)))
-          (delete-region start end)
+      (when (eq (pf-find-location line) t)
+        (let* ((start (point))
+               (lineno (or (pf--margin-lineno-before-point) 10)))
+          (forward-line 1)
+          (delete-region start (point))
+
           (goto-char start)
           (when (not (eobp))
             (forward-line 1)
-            (pf--set-common-prefix)))
-        (cons start lineno)))))
+            (pf--set-common-prefix))
+          (cons start lineno))))))
 
 (defun pf--find-common-dir (a b)
   "Find common directories between A and B.
@@ -471,8 +512,8 @@ BUF is passed to `pf-root-dir' for releativ paths."
 (defun pf-kill-buffer ()
   "Kill the project-find buffer."
   (when (get-buffer pf-buffer-name)
-         (let ((kill-buffer-query-functions nil))
-           (kill-buffer "*project-find*"))))
+    (let ((kill-buffer-query-functions nil))
+      (kill-buffer "*project-find*"))))
 
 (defun pf-init (&optional name)
   "Initialize and switch to the project-find buffer.
