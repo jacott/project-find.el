@@ -58,6 +58,9 @@
 (defvar-local pf--update-count 0
   "Count updates to buffer.")
 
+(defvar-local pf-matching-buffer nil
+  "If t only show files that match an open buffer.")
+
 (defgroup pf-faces nil
   "Faces used with utr."
   :group 'project-find)
@@ -105,6 +108,9 @@
 (defvar-local pf--margin-overlays nil
   "Cache margin overlays.")
 
+(defvar-local pf--option-menu-help-overlay nil
+  "Cache margin overlays.")
+
 (defvar-local pf--selected-overlay nil
   "The overlay for the selected line.")
 
@@ -113,6 +119,12 @@
 
 (defvar-local pf--selected-lineno 0
   "The selected line number.")
+
+(defvar-keymap pf-option-menu-map
+  :doc "Alternative Keymap for `project-find-mode' for configuring options."
+  "b" #'pf-toggle-matching-buffer)
+
+(define-key pf-option-menu-map [t] #'pf-option-menu)
 
 (defvar-keymap project-find-mode-map
   :doc "Keymap for `project-find-mode'."
@@ -123,6 +135,7 @@
   "<remap> <next-line>" #'pf-forward-line
   "<backspace>" #'pf-backward-delete-char
   "<return>" #'pf-find-selected
+  "TAB" #'pf-option-menu
   "M-1" #'pf-find-entry
   "M-2" #'pf-find-entry
   "M-3" #'pf-find-entry
@@ -143,6 +156,7 @@
   (setq buffer-read-only t
         pf--margin-overlays (pf--make-margin-overlays)
         pf--selected-overlay (make-overlay 1 1)
+        pf--option-menu-help-overlay (make-overlay 1 1)
         pf--dir-overlay (make-overlay 1 1)
         bidi-paragraph-direction 'left-to-right)
 
@@ -150,6 +164,36 @@
 
   (overlay-put pf--selected-overlay 'face 'pf-selected-face)
   (overlay-put pf--dir-overlay 'cursor-intangible t))
+
+(defun pf-option-menu ()
+  "Select a find option."
+  (interactive)
+  (let ((inhibit-read-only t)
+        (inhibit-modification-hooks t))
+    (if (eq (current-local-map) pf-option-menu-map)
+        (progn
+          (delete-region (overlay-start pf--option-menu-help-overlay)
+                         (overlay-end pf--option-menu-help-overlay))
+          (pf-propertize-filter-text)
+          (use-local-map project-find-mode-map))
+
+      (goto-char (point-min))
+      (insert "Filter options:
+b  toggle matching only if corresponding buffer
+
+")
+      (move-overlay pf--option-menu-help-overlay (point-min) (point))
+      (set-text-properties (point) (overlay-start pf--dir-overlay)
+                           '(invisible t))
+      (backward-char 1)
+      (use-local-map pf-option-menu-map))))
+
+(defun pf-toggle-matching-buffer ()
+  "Toggle only showing files that have a corresponding buffer."
+  (interactive)
+  (setq pf-matching-buffer (not pf-matching-buffer))
+  (pf-option-menu)
+  (pf-redraw))
 
 (defun pf-buffer-changed (_start _end _old-len)
   "Hook that sends any changes of the filter to the back-end server."
@@ -534,22 +578,23 @@ Set the NAME for the type of find initialized."
           pf--filter-text "")
     (use-local-map project-find-mode-map)))
 
-(defun pf (&optional dir &rest args)
+(defun pf (&optional dir &rest options)
   "Do incremental search using `project-find' from `project-root'.
 Start pf for the current buffer' `project-root'.  If DIR is not nil
 start searching from DIR, which can be relative to `project-root'.
-ARGS is keyword/argument pairs defined as follows:
+OPTIONS can be given as keywords.  Available keywords are:
 
-:name NAME -- Title to show in the buffer before DIR.
+:name        Title to show in the buffer before DIR.
 
-:ignore IGNORE -- Pattern used to exclude files from results.
+:ignore      Pattern used to exclude files from results.
 
-:base-filter BASE_FILTER -- Pattern to require for file to be in
-results."
+:base-filter Pattern to require for file to be in results.
+
+\(fn DIR &key NAME IGNORE BASE-FILTER)"
   (interactive)
-  (let ((ignore (plist-get args :ignore))
-        (base-filter (plist-get args :base-filter)))
-    (pf-init (plist-get args :name))
+  (let ((ignore (plist-get options :ignore))
+        (base-filter (plist-get options :base-filter)))
+    (pf-init (plist-get options :name))
     (pf--make-process)
     (when ignore (pf-ignore ignore))
     (when base-filter (pf-base-filter base-filter))

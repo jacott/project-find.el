@@ -31,6 +31,21 @@
 (require 'project)
 (require 'project-find-test-helper)
 
+(ert-deftest pf-tab-menu ()
+  (pf-my-test-fixture
+   (should (equal (cadr pf-option-menu-map) '(t . pf-option-menu)))
+   (pf)
+   (should (eq (keymap-local-lookup "TAB") #'pf-option-menu))
+   (pf-option-menu)
+   (goto-char (point-min))
+   (should (looking-at "Filter options:"))
+   (should (eq (keymap-local-lookup "b") #'pf-toggle-matching-buffer))
+   (should (not pf-matching-buffer))
+   (pf-toggle-matching-buffer)
+   (should pf-matching-buffer)
+   (should (eq (keymap-local-lookup "b") nil))
+))
+
 (ert-deftest pf ()
   (pf-my-test-fixture
    (pf)
