@@ -481,6 +481,7 @@ Set the NAME for the type of find initialized."
     (pf-kill-buffer)
     (switch-to-buffer (pf-get-buffer-create cdir) t t)
     (setq-local left-margin-width 2)
+    (set-window-buffer nil (pf-get-buffer-create))
     (if name
         (if (get-text-property 0 'face name)
             (setq pf--name name)
