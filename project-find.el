@@ -102,6 +102,9 @@
 (defvar-local pf-find-function nil
   "Custom find function called when an entry is selected.")
 
+(defvar-local pf-propertize-line nil
+  "Custom function to add properties to a line before adding to results.")
+
 (defvar-local pf-resync-function nil
   "Custom function to resync the matched lines.")
 
@@ -234,7 +237,9 @@ OUTPUT contains data from the process."
   (let ((c (aref line 0)))
     (cond
      ((eq c ?c) (pf-clear-output))
-     ((eq c ?+) (pf-add-line (substring line 1)))
+     ((eq c ?+) (pf-add-line (if pf-propertize-line
+                                 (funcall pf-propertize-line (substring line 1))
+                               (substring line 1))))
      ((eq c ?-) (pf-rm-line (substring line 1)))
      ((eq c ?r) (progn (funcall (or pf-resync-function #'ignore)) nil))
      ((eq c ?s) (ignore))
@@ -245,6 +250,10 @@ OUTPUT contains data from the process."
 (defun pf-match-line (line)
   "Check if LINE matches filter."
   (pf--process-send (concat "match " line "\x00")))
+
+(defun pf-skip-prefix (n)
+  "Skip N characters when matching lines."
+  (pf--process-send (format "skip-prefix %d\x00" n)))
 
 (defun pf-add-line (line)
   "Insert LINE into buffer.  Return pos and lineo of insertion."
@@ -487,9 +496,9 @@ Opens the selected line if N is nil or 0."
   (set-text-properties (point-min) (overlay-start pf--dir-overlay)
                        pf--filter-properties))
 
-(defun pf-filter-results ()
+(defun pf-resend-filter ()
   "Filter the results using filter text."
-  (pf--process-send (format "set %d %s\x00" (length pf--base-filter) pf--filter-text)))
+  (pf--process-send (format "set 0 %s%s\x00" pf--base-filter pf--filter-text)))
 
 (defun pf-self-filter-add ()
   "Add self to `project-find' search filter."
@@ -537,14 +546,19 @@ BUF is passed to `pf-root-dir' for relative paths."
   "Set the window SIZE of the servier process."
   (pf--process-send (format "window_size %s\x00" size)))
 
+(defun pf-stop-matching ()
+  "Stop matching lines and forget previous matches."
+  (pf--process-send "stop\x00"))
+
 (defun pf-ignore (ignore)
   "Set the IGNORE pattern."
   (pf--process-send (format "ignore %s\x00" ignore)))
 
 (defun pf-base-filter (text)
   "Set the TEXT used as a base filter."
-  (setq pf--base-filter (concat (string-trim text) " "))
-  (pf--process-send (format "set 0 %s %s\x00" pf--base-filter pf--filter-text)))
+  (setq text (string-trim text))
+  (setq pf--base-filter (if (string-empty-p text) "" (concat text " ")))
+  (pf-resend-filter))
 
 (defun pf-quit ()
   "Quit project find."
@@ -576,7 +590,7 @@ Set the NAME for the type of find initialized."
     (pf-kill-buffer)
     (switch-to-buffer (pf-get-buffer-create cdir) t t)
     (setq-local left-margin-width 2)
-    (set-window-buffer nil (pf-get-buffer-create))
+    (set-window-buffer nil (pf-get-buffer-create)) ;; needed to see margins
     (pf--make-process)
     (pf-window-size (- (window-text-height) 2))
     (if name
@@ -619,7 +633,7 @@ OPTIONS can be given as keywords.  Available keywords are:
                 :coding 'no-conversion
                 :noquery t
                 :buffer (current-buffer)
-                :stderr nil
+                :stderr nil ;; "*project-find:stderr*"
                 :connection-type 'pipe
                 :filter #'pf-process-filter
                 :sentinel #'pf-process-sentinel))

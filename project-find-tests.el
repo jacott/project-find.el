@@ -23,13 +23,26 @@
 ;;
 ;;; Code:
 
+(require 'project-find)
 (require 'ert)
 (require 'ert-x)
 (require 'cl-lib)
 (require 'compile)
-(require 'project-find)
 (require 'project)
 (require 'project-find-test-helper)
+
+(defmacro pf-my-test-send (&rest body)
+  "A fixture to set up a common environment for tests.  BODY is the test code."
+  `(pf-my-test-fixture
+    (let* (results
+           (override (lambda (x)
+                       (setq results (cons x results))
+                       nil)))
+      (unwind-protect
+        (progn
+          (advice-add #'pf--process-send :override override)
+          ,@body)
+      (advice-remove #'pf--process-send override)))))
 
 (ert-deftest pf-tab-menu ()
   (pf-my-test-fixture
@@ -44,7 +57,7 @@
    (pf-toggle-matching-buffer)
    (should pf-matching-buffer)
    (should (eq (keymap-local-lookup "b") nil))
-))
+   ))
 
 (ert-deftest pf ()
   (pf-my-test-fixture
@@ -321,6 +334,56 @@
        (should (looking-at "test/1/3.txt")))
      (pf-find-selected)
      (should (equal text "test/1/3.txt")))))
+
+(ert-deftest pf-skip-prefix ()
+  (pf-my-test-send
+   (pf-skip-prefix 6)
+   (should (equal results '("skip-prefix 6\x00")))))
+
+(ert-deftest pf-stop-matching ()
+  (pf-my-test-send
+   (pf-stop-matching)
+   (should (equal results '("stop\x00")))))
+
+(ert-deftest pf-resend-filter ()
+  (pf-my-test-send
+   (switch-to-buffer (pf-get-buffer-create) t t)
+   (setq pf--base-filter "base:"
+         pf--filter-text "ft")
+
+   (pf-resend-filter)
+   (should (equal results '("set 0 base:ft\x00")))))
+
+
+(ert-deftest pf-custom-find ()
+  (pf-my-test-fixture
+   (let ((resync-func (lambda ()
+                        (pf-match-line "2b-line1")
+                        (pf-match-line "2b-notlineb")
+                        (pf-match-line "1a-line2")))
+         results)
+     (pf-init "My Tests: ")
+
+     (setq
+      pf-find-function (lambda (start end)
+                         (setq results (cons (list "pf-find-function" start end) results)))
+      pf-propertize-line (lambda (line)
+                           (put-text-property 0 1 'invisible t line)
+                           line)
+      pf-resync-function resync-func)
+     (pf-clear-output)
+     (pf-skip-prefix 3)
+     (pf-my-add-keys "<line")
+
+     (should (pf--wait-for
+              (lambda ()
+                (pf-goto-results)
+                (and (not (search-forward "notlineb" nil t))
+                     (progn
+                       (pf-goto-results)
+                       (search-forward "line1" nil t))))))
+     (pf-find-selected)
+     (should (equal results '(("pf-find-function" 43 51)))))))
 
 (ert-deftest pf-find-selected ()
   (pf-my-test-fixture
