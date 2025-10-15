@@ -171,34 +171,59 @@
   (overlay-put pf--selected-overlay 'face 'pf-selected-face)
   (overlay-put pf--dir-overlay 'cursor-intangible t))
 
-(defun pf-option-menu ()
-  "Select a find option."
-  (interactive)
-  (let ((inhibit-read-only t)
-        (inhibit-modification-hooks t))
+(defun pf-option-menu (&optional arg)
+  "Select a find option.
+With ARG nil, toggle the menu otherwise enable menu."
+  (interactive "P")
     (if (eq (current-local-map) pf-option-menu-map)
-        (progn
-          (delete-region (overlay-start pf--option-menu-help-overlay)
-                         (overlay-end pf--option-menu-help-overlay))
-          (pf-propertize-filter-text)
-          (use-local-map project-find-mode-map))
-
-      (goto-char (point-min))
-      (insert "Filter options:
+        (or arg (pf-option-menu-off))
+      (let ((inhibit-read-only t)
+            (inhibit-modification-hooks t))
+        (goto-char (point-min))
+        (insert "Filter options:
 b  toggle matching only if corresponding buffer
 
 ")
-      (move-overlay pf--option-menu-help-overlay (point-min) (point))
-      (set-text-properties (point) (overlay-start pf--dir-overlay)
+        (move-overlay pf--option-menu-help-overlay (point-min) (point))
+        (set-text-properties (point) (overlay-start pf--dir-overlay)
                            '(invisible t))
-      (backward-char 1)
-      (use-local-map pf-option-menu-map))))
+        (backward-char 1)
+        (use-local-map pf-option-menu-map))))
+
+(defun pf-option-menu-off ()
+  "Turn off pf-option-menu if showing."
+  (when (eq (current-local-map) pf-option-menu-map)
+    (let ((inhibit-read-only t)
+          (inhibit-modification-hooks t))
+      (delete-region (overlay-start pf--option-menu-help-overlay)
+                     (overlay-end pf--option-menu-help-overlay))
+      (pf-propertize-filter-text)
+      (goto-char (point-min))
+      (end-of-line)
+      (use-local-map project-find-mode-map))))
 
 (defun pf-toggle-matching-buffer ()
   "Toggle only showing files that have a corresponding buffer."
   (interactive)
+  (pf-option-menu-off)
   (setq pf-matching-buffer (not pf-matching-buffer))
-  (pf-option-menu))
+  (pf-stop-matching)
+  (pf-clear-output)
+  (pf-resend-filter)
+  (setq pf-resync-function (and pf-matching-buffer #'pf-list-file-buffers))
+  (if pf-matching-buffer
+      (pf-list-file-buffers)
+    (pf-walk default-directory)))
+
+(defun pf-list-file-buffers ()
+  "List buffers selecting files in `default-directory' that match filter."
+  (let* ((dir (abbreviate-file-name default-directory))
+         (len (length dir)))
+  (mapc (lambda (buf)
+          (with-current-buffer buf
+            (when (string-prefix-p dir (or buffer-file-truename ""))
+              (pf-match-line (substring buffer-file-truename len)))))
+        (buffer-list))))
 
 (defun pf-buffer-changed (_start _end _old-len)
   "Hook that sends any changes of the filter to the back-end server."
@@ -610,21 +635,37 @@ Start pf for the current buffer' `project-root'.  If DIR is not nil
 start searching from DIR, which can be relative to `project-root'.
 OPTIONS can be given as keywords.  Available keywords are:
 
-:name        Title to show in the buffer before DIR.
+:name         Title to show in the buffer before DIR.
 
-:ignore      Pattern used to exclude files from results.
+:ignore       Pattern used to exclude files from results.
 
-:base-filter Pattern to require for file to be in results.
+:base-filter  Pattern to require for file to be in results.
+
+:open-buffers Only list open buffers
 
 \(fn DIR &key NAME IGNORE BASE-FILTER)"
   (interactive)
   (let ((ignore (plist-get options :ignore))
         (base-filter (plist-get options :base-filter)))
+    (setq dir (pf-root-dir dir))
     (pf-init (plist-get options :name))
+    (setq default-directory dir)
     (when ignore (pf-ignore ignore))
     (when base-filter (pf-base-filter base-filter))
     (pf-clear-output)
-    (pf-walk (or dir ""))))
+    (setq pf-matching-buffer (and (plist-get options :open-buffers) t))
+    (if pf-matching-buffer
+        (progn
+          (setq
+           pf-resync-function #'pf-list-file-buffers)
+          (pf-list-file-buffers))
+      (pf-walk dir))))
+
+(defun pf-buffers (&optional dir &rest options)
+  "Run `pf' with `:open-buffers' t.
+DIR and OPTIONS are passed to `pf' otherwise untoched."
+  (interactive)
+  (apply #'pf dir (plist-put options :open-buffers t)))
 
 (defun pf--make-process ()
   "Start the koru_find program."
@@ -656,6 +697,7 @@ OPTIONS can be given as keywords.  Available keywords are:
         (move-overlay pf--dir-overlay start (point))
         (pf-propertize-filter-text)
         (goto-char (point-min))
+        (end-of-line)
         nil))))
 
 (defun pf-backward-line (&optional n)

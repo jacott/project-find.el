@@ -21,7 +21,9 @@ FORMAT-STRING and ARGS are passed to `format'."
                              "/koru_find")))
      (unwind-protect
          (progn ,@body)
-
+       (let ((kill-buffer-query-functions nil))
+         (when (get-buffer "2.txt") (kill-buffer "2.txt"))
+         (when (get-buffer "3.txt") (kill-buffer "3.txt")))
        (pf-kill-buffer))))
 
 (defun pf-my-add-keys (keys &optional ready-test time)
