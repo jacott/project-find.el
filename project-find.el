@@ -99,6 +99,9 @@
 (defvar-local pf--name (propertize "Find file: " 'face 'pf-name-face)
   "The name of the type of find being performed.  See `pf-init'.")
 
+(defvar-local pf-limit-to-recent nil
+  "Limit results to this amount of recent items.")
+
 (defvar-local pf-find-function nil
   "Custom find function called when an entry is selected.")
 
@@ -480,7 +483,7 @@ This function must be called with `pf-buffer-name' as the current buffer."
 Opens the selected line if N is nil or 0."
   (interactive "P")
   (when n
-    (pf-forward-line n))
+    (pf-forward-line (if (integerp n) n 4)))
   (when (overlay-buffer pf--selected-overlay)
     (pf-find-entery-at (pf-selected-start) (pf-selected-end))))
 
@@ -780,11 +783,26 @@ is always called from the `project-find' buffer."
 
 (defun pf-find-project-list-projects ()
   "List projects matching TEXT filter using `pf-find-project'."
-  (mapc #'pf-match-line (project-known-project-roots)))
+  (if pf-limit-to-recent
+      (let* ((list (buffer-list))
+             (known (make-hash-table :size (* 2 (length list))))
+             pr line)
+        (while list
+          (setq pr (project-current nil (with-current-buffer (car list) default-directory)))
+          (when pr
+            (setq line (project-root pr))
+            (unless (gethash line known)
+              (puthash line t known)
+              (pf-match-line (substring line 0 -1))))
+          (setq list (cdr list))))
+    (mapc (lambda (line)
+            (pf-match-line (substring line 0 -1)))
+          (project-known-project-roots))))
 
-(defun pf-find-project ()
-  "List all projects."
-  (interactive)
+(defun pf-find-project (&optional arg)
+  "List all projects.
+Use ARG to limit the projects listed to currently open projects."
+  (interactive "P")
   (let ((inhibit-modification-hooks t)
         (inhibit-read-only t)
         (dir (pf-root-dir)))
@@ -794,6 +812,9 @@ is always called from the `project-find' buffer."
     (setq default-directory dir
           pf-find-function #'pf-find-project-open-project
           pf-resync-function #'pf-find-project-list-projects)
+    (when arg
+      (setq pf-limit-to-recent 1))
+
     (pf-clear-output)
     (pf-find-project-list-projects)))
 

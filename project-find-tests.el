@@ -278,9 +278,48 @@
            (pf-forward-line 2)
 
            (pf-find-selected)
-           (should (string-suffix-p "test/1/" open-dir)))
+           (should (string-suffix-p "test/1" open-dir)))
        (advice-remove #'project-known-project-roots proots))))
   (should (not (get-buffer pf-buffer-name))))
+
+(ert-deftest pf-find-project-with-limit ()
+  (pf-my-test-fixture
+   (let* ((len (length default-directory))
+          (list '(("ptest/a/" . "test/a/")
+                  ("ptest/b/" . "test/b/")
+                  ("ptest/1/" . "test/1/")
+                  ("ptest/1/a/" . "test/1/")))
+          (proot (lambda (pr)
+                   (alist-get pr list default-directory nil #'equal)))
+          (pcur (lambda (&optional p dir)
+                  (should (not p))
+                  (concat "p" (substring (abbreviate-file-name (or dir default-directory)) len nil)))))
+
+     (mapc (lambda (item)
+             (find-file-noselect (substring (car item) 1 nil)))
+           list)
+
+     (unwind-protect
+         (progn
+           (advice-add #'project-current :override pcur)
+           (advice-add #'project-root :override proot)
+
+           (pf-find-project '(4))
+           (should (equal 1 pf-limit-to-recent))
+           (pf-goto-results)
+           (save-excursion
+             (should
+              (pf--wait-for (lambda ()
+                              (pf-goto-results)
+                              (search-forward "test/1" nil t)))))
+
+           (should
+           (save-excursion
+             (pf-goto-results)
+             (not (search-forward "p/1/p1" nil t)))))
+
+       (advice-remove #'project-root proot)
+       (advice-remove #'project-current pcur)))))
 
 (ert-deftest pf-with-base-filter ()
   (pf-my-test-fixture
