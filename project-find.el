@@ -462,12 +462,15 @@ This function must be called with `pf-buffer-name' as the current buffer."
       (funcall pf-find-function start end)
     (let ((filename (buffer-substring-no-properties start end)))
       (if (file-exists-p filename)
-          (let ((buf (current-buffer))
-                (nbuf (find-file-noselect filename)))
-            (switch-to-prev-buffer nil 'kill)
-            (switch-to-buffer nbuf nil t)
-            (bury-buffer-internal buf))
+          (pf--switch-to-buffer (find-file-noselect filename))
         (error "File does not exist %s" filename)))))
+
+(defun pf--switch-to-buffer (buf)
+  "Switch to BUF in current window, burying the `project-find' buffer."
+  (let ((pbuf (current-buffer)))
+    (switch-to-prev-buffer nil 'kill)
+    (switch-to-buffer buf nil t)
+    (bury-buffer-internal pbuf)))
 
 (defun pf-selected-start ()
   "Return the buffer position of the start of the selected line."
@@ -633,7 +636,7 @@ Set the NAME for the type of find initialized."
     (use-local-map project-find-mode-map)))
 
 (defun pf (&optional dir &rest options)
-  "Do incremental search using `project-find' from `project-root'.
+  "Incremental search using `project-find' from `project-root'.
 Start pf for the current buffer' `project-root'.  If DIR is not nil
 start searching from DIR, which can be relative to `project-root'.
 OPTIONS can be given as keywords.  Available keywords are:
@@ -664,11 +667,16 @@ OPTIONS can be given as keywords.  Available keywords are:
           (pf-list-file-buffers))
       (pf-walk dir))))
 
-(defun pf-buffers (&optional dir &rest options)
-  "Run `pf' with `:open-buffers' t.
-DIR and OPTIONS are passed to `pf' otherwise untoched."
+(defun pf-all-buffers ()
+  "Incremental search of existing buffers."
   (interactive)
-  (apply #'pf dir (plist-put options :open-buffers t)))
+  (pf-init "Buffers: ")
+  (pf-clear-output)
+  (setq
+   pf-find-function #'pf--switch-existing-buffer
+   pf-propertize-line #'pf--propertize-existing-buffers-line
+   pf-resync-function #'pf--list-existing-buffers)
+  (pf--list-existing-buffers))
 
 (defun pf--make-process ()
   "Start the koru_find program."
@@ -750,6 +758,53 @@ Returns the start of the selection."
               (setq pf--selected-lineno (+ pf--selected-lineno n))
               (move-overlay pf--selected-overlay p (point)))))))))
 
+
+(defun pf--switch-existing-buffer (start end)
+  "Switch to buffer listed in `project-find' buffer between START and END.
+This function is used to override `pf-find-function' and assumes that it
+is always called from the `project-find' buffer."
+  (let* ((line (buffer-substring-no-properties start end))
+         (sep (string-search ": \"" line))
+         (buf (if sep
+                  (get-buffer (substring line (+ sep 3)  -1))
+                (if (string-prefix-p "\"" line)
+                    (get-buffer (substring line 1 -1))
+                  (get-file-buffer (expand-file-name line))))))
+    (if buf
+        (pf--switch-to-buffer buf)
+      (error "Can't find buffer for %s" line))))
+
+(defun pf--list-existing-buffers ()
+  "List existing buffers."
+  (let* ((dir (abbreviate-file-name default-directory))
+         (len (length dir)))
+    (mapc
+     (lambda (buf)
+       (let (qname
+             (bname (buffer-name buf))
+             (fn (abbreviate-file-name (or (buffer-file-name buf)
+                                           (with-current-buffer buf default-directory)))))
+         (unless (string-prefix-p " " bname)
+           (when (string-prefix-p dir fn)
+             (setq fn (substring fn len nil)))
+           (if (string-suffix-p (buffer-name buf) fn)
+               (pf-match-line fn)
+             (setq qname (concat "\"" bname "\""))
+             (if (string-empty-p fn)
+                 (pf-match-line qname)
+               (pf-match-line (concat fn ": " qname)))))))
+     (buffer-list))))
+
+(defun pf--propertize-existing-buffers-line (line)
+  "Add text properties to LINE."
+  (if (string-prefix-p "\"" line)
+      (put-text-property 0 (length line) 'face 'pf-name-face line)
+    (when-let* ((sep (string-search ": \"" line)))
+      (put-text-property 1 sep 'face 'pf-common-prefix-face line)
+      (put-text-property (+ 2 sep) (length line) 'face 'pf-name-face line)))
+  line)
+
+
 (defun pf-build-regex (text)
   "Build `pf-filter-re' from TEXT."
   (let ((esc nil))
@@ -769,7 +824,6 @@ Returns the start of the selection."
                ""
                ))
            text))))
-
 
 (defun pf-find-project-open-project (start end)
   "Find project listed in `project-find' buffer between START and END.

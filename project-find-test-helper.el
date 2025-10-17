@@ -16,14 +16,16 @@ FORMAT-STRING and ARGS are passed to `format'."
   `(let ((inhibit-message t)
          (pf--update-count 0)
          (pf-filter-re "")
+         (my-pf-kill-buffers '("2.txt" "3.txt"))
          (pf-command (concat (file-name-directory
                               (find-lisp-object-file-name #'pf nil))
                              "/koru_find")))
      (unwind-protect
          (progn ,@body)
        (let ((kill-buffer-query-functions nil))
-         (when (get-buffer "2.txt") (kill-buffer "2.txt"))
-         (when (get-buffer "3.txt") (kill-buffer "3.txt")))
+         (mapc (lambda (bn)
+                 (when (get-buffer bn) (kill-buffer bn)))
+               my-pf-kill-buffers))
        (pf-kill-buffer))))
 
 (defun pf-my-add-keys (keys &optional ready-test time)

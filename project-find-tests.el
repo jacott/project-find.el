@@ -457,6 +457,7 @@
      (pf-clear-output)
      (pf-skip-prefix 3)
      (pf-my-add-keys "<line")
+     (funcall resync-func)
 
      (should (pf--wait-for
               (lambda ()
@@ -507,5 +508,29 @@
    (pf-forward-line)
    (should
     (not (overlay-buffer pf--selected-overlay)))))
+
+(ert-deftest pf-all-buffers ()
+  (pf-my-test-fixture
+   (find-file-noselect "test/b/2.txt")
+   (find-file-noselect "test/1/3.txt")
+   (get-buffer-create "*specialx*")
+   (get-buffer-create " *hidden*")
+   (setq my-pf-kill-buffers (append '(" *hidden*" "*specialx*") my-pf-kill-buffers))
+   (pf-all-buffers)
+   (should (not pf-matching-buffer))
+   (should (pf--wait-for (lambda ()
+                           (pf-goto-results)
+                           (search-forward "specialx" nil t)
+                           )))
+   (pf-goto-results)
+   (should (not (search-forward "hidden" nil t)))
+   (should
+    (pf-my-add-keys
+     "x" (lambda ()
+           (pf-goto-results)
+           (looking-at "\"\\*specialx\\*\""))))
+   (pf-find-selected)
+   (should (equal "*specialx*" (buffer-name)))
+))
 
 ;;; project-find-tests.el ends here
